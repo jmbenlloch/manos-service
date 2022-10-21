@@ -1,0 +1,83 @@
+version: '3'
+
+services:
+  database:
+    image: postgres:9.6.24
+    environment:
+    - POSTGRES_DB=manos
+    - POSTGRES_USER=${DATABASE_USER}
+    - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+    - PGDATA=/database
+    volumes:
+      - /home/manos/backups:/data
+      - db-volume:/database
+    ports:
+      - 5432:5432
+
+  web:
+    image: jmbenlloch/manos-web
+    depends_on: [database, elasticsearch]
+    volumes:
+      - /home/manos/manos-source:/manos
+    # command: ["/bin/sh", "-ec", "while true; do sleep 10000000; done"]
+    command: ['bash', '-c', 'RAILS_ENV=production bundle exec unicorn -p 3000 -c /manos/config/unicorn.rb']
+    # ports:
+    #   - 3000:3000
+
+  elasticsearch:
+    image: elasticsearch:1.3.7
+    volumes:
+      - elasticdata:/usr/share/elasticsearch/data
+    environment:
+      - discovery.type=single-node
+      - node.name=elasticsearch
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - xpack.license.self_generated.type=basic
+
+  nginx:
+    image: nginx:stable
+    depends_on: [web]
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - html-volume:/html
+      - letsencrypt-volume:/etc/letsencrypt
+    restart: always
+
+  nginx_get_ssl:
+    image: nginx:stable
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./nginx/nginx_get_ssl.conf:/etc/nginx/nginx.conf
+      - html-volume:/html
+      - letsencrypt-volume:/etc/letsencrypt
+
+  create_certs:
+    image: certbot/certbot
+    depends_on: [nginx_get_ssl]
+    volumes:
+      - html-volume:/html
+      - letsencrypt-volume:/etc/letsencrypt
+    command: certonly --webroot -w /html -d manos.net --agree-tos --force-renewal --register-unsafely-without-email
+
+  inspect:
+    image: certbot/certbot
+    volumes:
+      - letsencrypt-volume:/etc/letsencrypt
+      - html-volume:/html
+    entrypoint: /bin/sh
+
+
+volumes:
+  elasticdata:
+    driver: local
+  html-volume:
+    driver: local
+  letsencrypt-volume:
+    driver: local
+  db-volume:
+    driver: local
